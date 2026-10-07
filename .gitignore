@@ -1,0 +1,6 @@
+/target
+**/*.rs.bk
+*.editable.html
+*.revised.html
+.DS_Store
+Thumbs.db

@@ -1,0 +1,11 @@
+[package]
+name = "do-html-editable-cli"
+version = "0.1.0"
+edition = "2021"
+description = "A lightweight, standalone CLI that transforms static HTML files into visually editable browser documents with zero server overhead."
+license = "MIT OR Apache-2.0"
+readme = "README.md"
+
+[dependencies]
+clap = { version = "4", features = ["derive"] }
+opener = "0.7"
