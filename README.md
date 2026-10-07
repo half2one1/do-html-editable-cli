@@ -1,27 +1,25 @@
-# do-html-editable-cli ⚡
+# do-html-editable-cli ⚡ (v0.1.1)
 
-A lightweight, standalone, single-file Rust CLI application that transforms static, AI-generated HTML files into visually editable browser documents with **zero external server overhead** and **100% air-gapped compliance**.
+A high-performance, standalone Rust CLI tool and **Model Context Protocol (MCP)** stdio server that enables AI agents and humans to inspect, edit, word-process, and visually modify static HTML and standalone SVG documents with **zero external server overhead** and **100% air-gapped compliance**.
 
 ![Rust](https://img.shields.io/badge/Language-Rust-orange.svg)
+![Version](https://img.shields.io/badge/Version-v0.1.1-brightgreen.svg)
+![MCP Supported](https://img.shields.io/badge/MCP-JSON--RPC%202.0-purple.svg)
 ![License](https://img.shields.io/badge/License-MIT%2FApache--2.0-blue.svg)
-![Dependencies](https://img.shields.io/badge/Dependencies-Minimal-green.svg)
 
 ---
 
-## 🚀 Key Highlights
+## 🌟 What's New in v0.1.1
 
-- **Air-Gapped Compliance**: Zero local background microservers (no Actix, Axum, or Node.js). Everything runs directly via the browser's native `file://` protocol.
-- **Zero Internet Dependencies**: Injected styles and JavaScript runtime are 100% self-contained inside the compiled Rust binary. No CDNs, no external CSS/JS frameworks.
-- **Non-Destructive Processing**: Reads `filename.html` and creates `filename.editable.html` in the same directory, leaving the original source file completely untouched.
-- **Clean Export Engine**: One-click export purges every trace of injected runtime code, styles, and toolbar elements, generating a pure, sanitized `filename.revised.html`.
-- **Smart Boundary Backspace & Delete Protection**: Prevents native browser bugs where pressing `Backspace` at offset 0 collapses adjacent blocks or deletes entire list items and sentences.
-- **Modern Floating Dock**: Draggable, minimalist dark glassmorphism toolbar with real-time status indication, keyboard shortcuts (`Ctrl+S` / `Cmd+S`, `Alt+E`), and click-to-edit toggle.
+- 🤖 **Model Context Protocol (MCP) Server**: Connect directly to AI hosts (Claude Desktop, Cursor, Antigravity) via `do-html-editable-cli mcp` over stdio with full tool schemas.
+- 📝 **CLI Word-Processing Session (`session`)**: Interactive REPL or batch script runner supporting `list`, `get`, `set`, `replace`, `append`, `prepend`, and `save` with optional machine-readable `--json` envelopes.
+- 🎯 **One-Shot CLI Editing (`edit`)**: Direct command-line tools to enumerate text nodes, get text, set text, and search-and-replace by index (`#0`, `#1`) or CSS selector.
+- 🛡️ **Smart Boundary Backspace & Delete Protection**: Prevents native browser bugs from wiping sentences or merging blocks when Backspacing at offset 0.
+- 🎨 **Full SVG Vector Panel Compatibility**: Native support for standalone SVG vector files with fallback append injection.
 
 ---
 
 ## 📦 Installation & Build
-
-Ensure you have Rust and Cargo installed:
 
 ```bash
 git clone https://github.com/half2one1/do-html-editable-cli.git
@@ -29,40 +27,121 @@ cd do-html-editable-cli
 cargo build --release
 ```
 
-The optimized standalone binary will be located at `target/release/do-html-editable-cli`.
+The compiled binary will be located at `target/release/do-html-editable-cli`.
 
 ---
 
-## 💻 Usage
+## 🤖 MCP Server Setup for AI Agents
 
-```bash
-# Transform an HTML file and open it immediately in your default browser:
-do-html-editable-cli path/to/document.html
+`do-html-editable-cli` can act as an MCP stdio server, empowering AI agents to perform surgical word-processing on HTML and SVG files without full-file rewrites.
 
-# Process an HTML file without automatically opening the browser:
-do-html-editable-cli path/to/document.html --no-open
+### Claude Desktop / Cursor / Antigravity Configuration
+
+Add to your MCP config file (e.g. `mcp_config.json` or `claude_desktop_config.json`):
+
+```json
+{
+  "mcpServers": {
+    "html-editor": {
+      "command": "d:/projects/make-html-editable/target/release/do-html-editable-cli.exe",
+      "args": ["mcp"]
+    }
+  }
+}
 ```
 
-### In-Browser Controls
+### Exposed MCP Tools
 
-Once the `.editable.html` file opens in your browser:
-- **Direct Visual Editing**: Click anywhere on text, headings, list items, or tables to edit them directly.
-- **[Toggle Edit]** (Shortcut: `Alt+E`): Switch between interactive Edit Mode and Preview Mode.
-- **[Clean Export]** (Shortcut: `Ctrl+S` / `Cmd+S`): Deep-clones the revised DOM, sanitizes all injected editor components, and triggers a clean native client download of `filename.revised.html`.
-- **Repositionable Dock**: Drag the floating toolbar by its background to place it anywhere on screen.
+| Tool | Description |
+|---|---|
+| `html_list_texts` | Enumerate editable text elements with `#idx`, CSS selector, ID, tag, and text preview. |
+| `html_get_text` | Retrieve exact text content of an element by index (`#0`) or CSS selector. |
+| `html_set_text` | Overwrite text of an element by index or selector, optionally saving to disk. |
+| `html_replace_text` | Global or targeted search-and-replace across text nodes. |
+| `html_batch_edit` | Atomically apply a list of text edits (set or replace). |
+| `html_make_editable` | Inject the air-gapped in-browser visual editing dock into an HTML/SVG document. |
+
+---
+
+## 💻 CLI Usage
+
+### 1. In-Browser Visual Editor (Air-Gapped)
+
+```bash
+# Open directly in default browser with floating visual editor:
+do-html-editable-cli document.html
+
+# Inject editor without launching browser:
+do-html-editable-cli document.html --no-open
+```
+
+In-browser controls:
+- **Direct Visual Editing**: Click anywhere on text, headings, list items, or tables to edit in-place.
+- **[Toggle Edit]** (`Alt+E`): Toggle between edit mode and preview mode.
+- **[Clean Export]** (`Ctrl+S` / `Cmd+S`): Deep-clones the revised DOM, purges all injected runtime tags, and downloads `filename.revised.html`.
+
+---
+
+### 2. Interactive & Scriptable Editing Session
+
+Start an interactive word-processing REPL:
+
+```bash
+do-html-editable-cli session document.html
+```
+
+Or run a non-interactive batch script with machine-readable JSON output:
+
+```bash
+do-html-editable-cli session document.html --script edits.txt --json
+```
+
+**Session Commands:**
+- `list [filter]` — Enumerate all editable text units (`#0`, `#1`, etc.).
+- `get <#idx|selector>` — Print current text.
+- `set <#idx|selector> <new_text>` — Overwrite element text.
+- `append <#idx|selector> <text>` — Append text to element.
+- `prepend <#idx|selector> <text>` — Prepend text to element.
+- `replace <old> <new>` — Global search and replace.
+- `replace in <#idx|selector> <old> <new>` — Targeted search and replace.
+- `save [path]` — Save modified document.
+- `quit` / `exit` — Exit session.
+
+---
+
+### 3. One-Shot Command-Line Editing
+
+```bash
+# List all text elements:
+do-html-editable-cli edit document.html list
+
+# List with JSON formatting:
+do-html-editable-cli edit document.html list --json
+
+# Get text of element #2:
+do-html-editable-cli edit document.html get "#2"
+
+# Set text of element #0 (saved to revised copy or in-place):
+do-html-editable-cli edit document.html set "#0" "New Executive Summary" --out revised.html
+do-html-editable-cli edit document.html set "#0" "New Executive Summary" --in-place
+
+# Global search and replace:
+do-html-editable-cli edit document.html replace "2025" "2026" --in-place
+```
 
 ---
 
 ## 🛠️ Architecture
 
-1. **Case-Insensitive Byte Scanner**: Locates the closing `</body>` tag (or falls back to appending at document end) using zero-allocation byte slice comparison.
-2. **Deterministic Element Tagging**: All injected elements (`<style>`, `<div>`, `<script>`) carry `data-editable-engine="true"`.
-3. **DOM Sanitization**: Deep-clones the root DOM, strips all tagged nodes, reconstructs the original `<!DOCTYPE>` declaration, and generates a native browser `Blob` download.
+1. **DOM Processor Engine (`HtmlProcessor`)**: Built on `kuchikiki` (HTML5 parser) with deep DOM tree traversal, CSS selector matching, and XML/HTML serialization.
+2. **Deterministic Element Tagging**: Injected visual elements carry `data-editable-engine="true"`, ensuring 100% clean sanitization upon export.
+3. **Smart Boundary Protection**: Intercepts `Backspace` and `Delete` at offset 0 of block containers during the capture phase, preventing destructive browser merges and sentence deletions.
+4. **Air-Gapped Self-Containment**: Zero external CDN calls, zero local HTTP background daemons.
 
 ---
 
 ## 📄 License
 
-Dual-licensed under either of:
+Dual-licensed under either:
 - Apache License, Version 2.0
 - MIT License

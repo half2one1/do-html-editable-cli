@@ -1,34 +1,150 @@
-//! # Make HTML Editable (CLI)
+//! # do-html-editable-cli (v0.1.1)
 //!
-//! A lightweight, standalone, single-file CLI application that processes static,
-//! AI-generated HTML files to make them visually editable directly inside any
-//! native browser without requiring a background server or external network dependencies.
+//! A lightweight, standalone CLI tool and MCP server that provides word-processing,
+//! AI-agent text editing, and air-gapped in-browser visual editing for static HTML
+//! and SVG documents with zero external server overhead.
 
-use clap::Parser;
+use clap::{Parser, Subcommand};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process;
+
+pub mod mcp;
+pub mod processor;
+pub mod session;
+
+use processor::HtmlProcessor;
+use session::EditingSession;
 
 /// Command-line argument configuration
 #[derive(Parser, Debug)]
 #[command(
     name = "do-html-editable-cli",
     author = "Antigravity Engineering",
-    version,
-    about = "Transform static HTML files into visually editable browser documents with zero server overhead.",
-    long_about = "A standalone, air-gapped CLI tool that injects a zero-dependency, in-browser\n\
-                  visual editing toolbar into HTML files. Generates a separate '.editable.html'\n\
-                  file and opens it in your default browser, allowing direct edits and one-click\n\
-                  clean exports with zero trace of injected code."
+    version = "0.1.1",
+    about = "Word-processing and in-browser visual editing CLI & MCP server for static HTML and SVG files.",
+    long_about = "A high-performance air-gapped tool for AI agents and humans to inspect, edit, and visually modify\n\
+                  static HTML and SVG documents with subcommands for MCP, interactive editing sessions, and browser injection."
 )]
 struct Cli {
-    /// Relative or absolute path to the target HTML file
-    #[arg(value_name = "HTML_FILE")]
-    input_path: PathBuf,
+    #[command(subcommand)]
+    command: Option<Commands>,
+
+    /// Direct target HTML/SVG file to make editable in browser (default workflow)
+    #[arg(value_name = "FILE")]
+    file: Option<PathBuf>,
 
     /// Do not automatically open the editable file in the default browser
     #[arg(long, default_value_t = false)]
     no_open: bool,
+}
+
+#[derive(Subcommand, Debug)]
+enum Commands {
+    /// Launch the air-gapped in-browser visual editor
+    Make {
+        /// Target HTML or SVG file
+        #[arg(value_name = "FILE")]
+        file: PathBuf,
+
+        /// Skip launching the default browser
+        #[arg(long, default_value_t = false)]
+        no_open: bool,
+    },
+
+    /// Start an interactive or scriptable CLI editing session
+    Session {
+        /// Target HTML or SVG file
+        #[arg(value_name = "FILE")]
+        file: PathBuf,
+
+        /// Batch script file to execute non-interactively
+        #[arg(long, value_name = "SCRIPT")]
+        script: Option<PathBuf>,
+
+        /// Output results as machine-readable JSON envelopes
+        #[arg(long, default_value_t = false)]
+        json: bool,
+
+        /// Save modifications directly in-place to the source file
+        #[arg(long, default_value_t = false)]
+        in_place: bool,
+    },
+
+    /// Perform one-shot command-line text inspection or editing
+    Edit {
+        /// Target HTML or SVG file
+        #[arg(value_name = "FILE")]
+        file: PathBuf,
+
+        #[command(subcommand)]
+        action: EditActions,
+    },
+
+    /// Run as a Model Context Protocol (MCP) stdio server for AI agents
+    Mcp,
+}
+
+#[derive(Subcommand, Debug)]
+enum EditActions {
+    /// List all editable text units in the file
+    List {
+        /// Optional substring filter
+        #[arg(long)]
+        filter: Option<String>,
+
+        /// Maximum number of items
+        #[arg(long)]
+        limit: Option<usize>,
+
+        /// Output in JSON format
+        #[arg(long, default_value_t = false)]
+        json: bool,
+    },
+
+    /// Get text of a specific element by #index or CSS selector
+    Get {
+        /// Target #index (#0) or CSS selector
+        target: String,
+    },
+
+    /// Set text of a specific element
+    Set {
+        /// Target #index (#0) or CSS selector
+        target: String,
+
+        /// New text string
+        text: String,
+
+        /// Modify source file in-place
+        #[arg(long, default_value_t = false)]
+        in_place: bool,
+
+        /// Optional output destination file
+        #[arg(long)]
+        out: Option<PathBuf>,
+    },
+
+    /// Search and replace text occurrences
+    Replace {
+        /// String to find
+        old: String,
+
+        /// Replacement string
+        new: String,
+
+        /// Target element scope (#index or CSS selector)
+        #[arg(long)]
+        target: Option<String>,
+
+        /// Modify source file in-place
+        #[arg(long, default_value_t = false)]
+        in_place: bool,
+
+        /// Optional output destination file
+        #[arg(long)]
+        out: Option<PathBuf>,
+    },
 }
 
 /// Injected styling, UI toolbar markup, and runtime script.
@@ -347,24 +463,36 @@ const INJECTED_ENGINE_TEMPLATE: &str = r###"
         residualToolbar.parentNode.removeChild(residualToolbar);
       }
 
-      // Step 4: Reconstruct doctype declaration
-      let doctypeString = "<!DOCTYPE html>\n";
-      if (document.doctype) {
-        doctypeString = "<!DOCTYPE " + document.doctype.name;
-        if (document.doctype.publicId) {
-          doctypeString += ' PUBLIC "' + document.doctype.publicId + '"';
+      // Check if this document originated as an SVG file
+      const isSvgExport = EXPORT_FILENAME.endsWith(".svg");
+      let cleanContent = "";
+
+      if (isSvgExport) {
+        const svgEl = domClone.querySelector("svg");
+        if (svgEl) {
+          cleanContent = '<?xml version="1.0" encoding="UTF-8"?>\n' + svgEl.outerHTML;
+        } else {
+          cleanContent = domClone.outerHTML;
         }
-        if (document.doctype.systemId) {
-          doctypeString += ' "' + document.doctype.systemId + '"';
+      } else {
+        // Step 4: Reconstruct doctype declaration
+        let doctypeString = "<!DOCTYPE html>\n";
+        if (document.doctype) {
+          doctypeString = "<!DOCTYPE " + document.doctype.name;
+          if (document.doctype.publicId) {
+            doctypeString += ' PUBLIC "' + document.doctype.publicId + '"';
+          }
+          if (document.doctype.systemId) {
+            doctypeString += ' "' + document.doctype.systemId + '"';
+          }
+          doctypeString += ">\n";
         }
-        doctypeString += ">\n";
+        cleanContent = doctypeString + domClone.outerHTML;
       }
 
-      // Step 5: Generate raw sanitized HTML string
-      const sanitizedHtml = doctypeString + domClone.outerHTML;
-
-      // Step 6: Native browser Blob download trigger
-      const blob = new Blob([sanitizedHtml], { type: "text/html;charset=utf-8" });
+      // Step 5: Native browser Blob download trigger
+      const mimeType = isSvgExport ? "image/svg+xml;charset=utf-8" : "text/html;charset=utf-8";
+      const blob = new Blob([cleanContent], { type: mimeType });
       const downloadUrl = URL.createObjectURL(blob);
       const downloadLink = document.createElement("a");
       downloadLink.href = downloadUrl;
@@ -401,13 +529,13 @@ const INJECTED_ENGINE_TEMPLATE: &str = r###"
 "###;
 
 /// Generates the injected engine block customized with the target export filename.
-fn generate_injected_engine(export_filename: &str) -> String {
+pub fn generate_injected_engine(export_filename: &str) -> String {
     INJECTED_ENGINE_TEMPLATE.replace("__DEFAULT_EXPORT_FILENAME__", export_filename)
 }
 
 /// Finds the byte offset of the closing `</body>` tag (case-insensitive) in the HTML content.
 /// Returns `None` if no `</body>` tag is present.
-fn find_closing_body_offset(html: &str) -> Option<usize> {
+pub fn find_closing_body_offset(html: &str) -> Option<usize> {
     let target = b"</body>";
     let bytes = html.as_bytes();
     if bytes.len() < target.len() {
@@ -422,7 +550,7 @@ fn find_closing_body_offset(html: &str) -> Option<usize> {
 
 /// Injects the self-contained editor engine into the HTML string.
 /// Injects right before the closing `</body>` tag if present; otherwise appends to the end.
-fn inject_editor_runtime(html: &str, export_filename: &str) -> String {
+pub fn inject_editor_runtime(html: &str, export_filename: &str) -> String {
     let engine_block = generate_injected_engine(export_filename);
 
     if let Some(offset) = find_closing_body_offset(html) {
@@ -440,9 +568,9 @@ fn inject_editor_runtime(html: &str, export_filename: &str) -> String {
     }
 }
 
-/// Computes the output `.editable.html` path and clean export `.revised.html` name.
+/// Computes the output `.editable.html` path and clean export `.revised.html` / `.revised.svg` name.
 /// Ensures the original file is preserved in the same directory without overwriting.
-fn derive_file_paths(input_path: &Path) -> (PathBuf, String) {
+pub fn derive_file_paths(input_path: &Path) -> (PathBuf, String) {
     let parent_dir = input_path.parent().unwrap_or_else(|| Path::new("."));
     let raw_stem = input_path
         .file_stem()
@@ -456,53 +584,46 @@ fn derive_file_paths(input_path: &Path) -> (PathBuf, String) {
         raw_stem
     };
 
+    let is_svg = input_path
+        .extension()
+        .and_then(|s| s.to_str())
+        .map(|s| s.eq_ignore_ascii_case("svg"))
+        .unwrap_or(false);
+
     let editable_filename = format!("{}.editable.html", clean_stem);
-    let revised_filename = format!("{}.revised.html", clean_stem);
+    let revised_filename = if is_svg {
+        format!("{}.revised.svg", clean_stem)
+    } else {
+        format!("{}.revised.html", clean_stem)
+    };
     let editable_path = parent_dir.join(editable_filename);
 
     (editable_path, revised_filename)
 }
 
-fn main() {
-    let cli = Cli::parse();
-
-    // Step 1: Validate input file existence and type
-    if !cli.input_path.exists() {
-        eprintln!(
-            "Error: Target HTML file '{}' does not exist.",
-            cli.input_path.display()
-        );
+/// Handles the `make` action (browser-based visual editor injection)
+fn handle_make(file_path: &Path, no_open: bool) {
+    if !file_path.exists() {
+        eprintln!("Error: Target file '{}' does not exist.", file_path.display());
         process::exit(1);
     }
 
-    if !cli.input_path.is_file() {
-        eprintln!(
-            "Error: Path '{}' is a directory, not a valid file.",
-            cli.input_path.display()
-        );
+    if !file_path.is_file() {
+        eprintln!("Error: Path '{}' is a directory, not a file.", file_path.display());
         process::exit(1);
     }
 
-    // Step 2: Read target HTML file into memory
-    let raw_html = match fs::read_to_string(&cli.input_path) {
+    let raw_html = match fs::read_to_string(file_path) {
         Ok(content) => content,
         Err(err) => {
-            eprintln!(
-                "Error: Failed to read file '{}': {}",
-                cli.input_path.display(),
-                err
-            );
+            eprintln!("Error: Failed to read file '{}': {}", file_path.display(), err);
             process::exit(1);
         }
     };
 
-    // Step 3: Derive output paths and filenames
-    let (editable_path, export_filename) = derive_file_paths(&cli.input_path);
-
-    // Step 4: Inject self-contained editing engine
+    let (editable_path, export_filename) = derive_file_paths(file_path);
     let modified_html = inject_editor_runtime(&raw_html, &export_filename);
 
-    // Step 5: Write out to the separate .editable.html file (keeping original intact)
     if let Err(err) = fs::write(&editable_path, &modified_html) {
         eprintln!(
             "Error: Failed to write editable file '{}': {}",
@@ -515,24 +636,21 @@ fn main() {
     println!("============================================================");
     println!(" do-html-editable-cli - Visual Browser Editor");
     println!("============================================================");
-    println!(" [✓] Source File   : {}", cli.input_path.display());
+    println!(" [✓] Source File   : {}", file_path.display());
     println!(" [✓] Editable File : {}", editable_path.display());
     println!(" [✓] Clean Export  : {}", export_filename);
     println!("------------------------------------------------------------");
     println!(" Features Active:");
     println!("  • In-browser visual editing via native document.designMode");
     println!("  • Floating toolbar with [Toggle Edit] and [Clean Export]");
+    println!("  • Boundary Backspace & Delete protection active");
     println!("  • 100% offline self-contained (zero CDNs, zero background server)");
-    println!("  • Clean export strips all editor code & outputs revised HTML");
     println!("============================================================");
 
-    // Step 6: Spawning native default system browser
-    if !cli.no_open {
+    if !no_open {
         println!("Spawning native default browser for '{}'...", editable_path.display());
         match opener::open(&editable_path) {
-            Ok(_) => {
-                println!("Browser launched successfully.");
-            }
+            Ok(_) => println!("Browser launched successfully."),
             Err(err) => {
                 eprintln!(
                     "Notice: Could not automatically launch system browser: {}.\n\
@@ -544,6 +662,166 @@ fn main() {
         }
     } else {
         println!("Note: Auto-open skipped (--no-open specified).");
+    }
+}
+
+/// Handles the `session` command
+fn handle_session(file_path: &Path, script: Option<&Path>, json_mode: bool, in_place: bool) {
+    let mut session = match EditingSession::new(file_path, in_place, json_mode) {
+        Ok(s) => s,
+        Err(err) => {
+            eprintln!("Error initializing session: {}", err);
+            process::exit(1);
+        }
+    };
+
+    if let Some(script_file) = script {
+        if let Err(err) = session.run_script(script_file) {
+            eprintln!("Script execution failed: {}", err);
+            process::exit(1);
+        }
+    } else {
+        if let Err(err) = session.run_interactive() {
+            eprintln!("Interactive session error: {}", err);
+            process::exit(1);
+        }
+    }
+}
+
+/// Handles the one-shot `edit` command
+fn handle_edit(file_path: &Path, action: EditActions) {
+    let proc = match HtmlProcessor::from_file(file_path) {
+        Ok(p) => p,
+        Err(err) => {
+            eprintln!("Error reading file: {}", err);
+            process::exit(1);
+        }
+    };
+
+    match action {
+        EditActions::List { filter, limit, json } => {
+            let texts = proc.list_texts(filter.as_deref(), limit);
+            if json {
+                let out = serde_json::to_string_pretty(&texts).unwrap();
+                println!("{}", out);
+            } else {
+                println!("Editable texts in '{}' (Total: {}):", file_path.display(), texts.len());
+                for t in &texts {
+                    let id_info = t.id.as_deref().map(|id| format!(" #{}", id)).unwrap_or_default();
+                    println!("[#{:<3}] <{}{}>: {}", t.index, t.tag, id_info, t.text);
+                }
+            }
+        }
+
+        EditActions::Get { target } => match proc.get_text(&target) {
+            Ok(text) => println!("{}", text),
+            Err(e) => {
+                eprintln!("Error: {}", e);
+                process::exit(1);
+            }
+        },
+
+        EditActions::Set {
+            target,
+            text,
+            in_place,
+            out,
+        } => {
+            if let Err(e) = proc.set_text(&target, &text) {
+                eprintln!("Error: {}", e);
+                process::exit(1);
+            }
+
+            let dest = if let Some(out_path) = out {
+                Some(out_path)
+            } else if in_place {
+                Some(file_path.to_path_buf())
+            } else {
+                // Default to .revised.html / .revised.svg
+                let stem = file_path.file_stem().and_then(|s| s.to_str()).unwrap_or("document");
+                let ext = if proc.is_svg { "svg" } else { "html" };
+                let parent = file_path.parent().unwrap_or_else(|| Path::new("."));
+                Some(parent.join(format!("{}.revised.{}", stem, ext)))
+            };
+
+            match proc.save(dest.as_ref()) {
+                Ok(saved) => println!("Updated '{}' -> saved to '{}'.", target, saved.display()),
+                Err(e) => {
+                    eprintln!("Error saving document: {}", e);
+                    process::exit(1);
+                }
+            }
+        }
+
+        EditActions::Replace {
+            old,
+            new,
+            target,
+            in_place,
+            out,
+        } => {
+            match proc.replace_text(&old, &new, target.as_deref()) {
+                Ok(count) => {
+                    let dest = if let Some(out_path) = out {
+                        Some(out_path)
+                    } else if in_place {
+                        Some(file_path.to_path_buf())
+                    } else {
+                        let stem = file_path.file_stem().and_then(|s| s.to_str()).unwrap_or("document");
+                        let ext = if proc.is_svg { "svg" } else { "html" };
+                        let parent = file_path.parent().unwrap_or_else(|| Path::new("."));
+                        Some(parent.join(format!("{}.revised.{}", stem, ext)))
+                    };
+
+                    match proc.save(dest.as_ref()) {
+                        Ok(saved) => println!(
+                            "Replaced {} occurrence(s) of '{}' with '{}' -> saved to '{}'.",
+                            count,
+                            old,
+                            new,
+                            saved.display()
+                        ),
+                        Err(e) => {
+                            eprintln!("Error saving document: {}", e);
+                            process::exit(1);
+                        }
+                    }
+                }
+                Err(e) => {
+                    eprintln!("Error: {}", e);
+                    process::exit(1);
+                }
+            }
+        }
+    }
+}
+
+fn main() {
+    let cli = Cli::parse();
+
+    if let Some(cmd) = cli.command {
+        match cmd {
+            Commands::Make { file, no_open } => handle_make(&file, no_open),
+            Commands::Session {
+                file,
+                script,
+                json,
+                in_place,
+            } => handle_session(&file, script.as_deref(), json, in_place),
+            Commands::Edit { file, action } => handle_edit(&file, action),
+            Commands::Mcp => {
+                if let Err(e) = mcp::run_mcp_server() {
+                    eprintln!("MCP Server error: {}", e);
+                    process::exit(1);
+                }
+            }
+        }
+    } else if let Some(file_path) = cli.file {
+        // Direct argument: default workflow (make editable in browser)
+        handle_make(&file_path, cli.no_open);
+    } else {
+        eprintln!("Error: No HTML/SVG file or command specified.\nRun 'do-html-editable-cli --help' for usage.");
+        process::exit(1);
     }
 }
 
@@ -588,5 +866,10 @@ mod tests {
         let (editable_path, revised_filename) = derive_file_paths(input);
         assert_eq!(editable_path, Path::new("tests/sample.editable.html"));
         assert_eq!(revised_filename, "sample.revised.html");
+
+        let svg_input = Path::new("tests/sample.svg");
+        let (editable_svg, revised_svg) = derive_file_paths(svg_input);
+        assert_eq!(editable_svg, Path::new("tests/sample.editable.html"));
+        assert_eq!(revised_svg, "sample.revised.svg");
     }
 }
